@@ -21,7 +21,16 @@ export async function POST(req) {
       body: JSON.stringify(previewBody),
     });
     const data = await workerRes.json();
-    if (!workerRes.ok) return Response.json({ error: data.error || "فشلت التجربة" }, { status: workerRes.status });
+    if (!workerRes.ok) {
+      const raw = String(data.error || "");
+      if (/payment_issue|payment_required|failed or incomplete payment|latest invoice/i.test(raw)) {
+        return Response.json({
+          error: "توقّف توليد الصوت مؤقتًا بسبب فاتورة غير مكتملة في حساب ElevenLabs. افتح Billing في ElevenLabs وأكمل سداد الفاتورة، ثم حاول مجددًا. لا تحتاج إلى إعادة تسجيل الصوت.",
+          code: "ELEVENLABS_BILLING"
+        }, { status: 402 });
+      }
+      return Response.json({ error: raw || "فشلت التجربة" }, { status: workerRes.status });
+    }
     return Response.json(data);
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
