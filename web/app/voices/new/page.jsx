@@ -74,6 +74,8 @@ export default function NewStandaloneVoice() {
   const [err, setErr] = useState("");
   const [origAnalysis, setOrigAnalysis] = useState(null);
   const [genAnalysis, setGenAnalysis] = useState(null);
+  const [speakerResult, setSpeakerResult] = useState(null);
+  const [speakerBusy, setSpeakerBusy] = useState(false);
   const [voiceId, setVoiceId] = useState(null);
   const [consentId, setConsentId] = useState(null);
   const [generatedAudio, setGeneratedAudio] = useState(null);
@@ -189,6 +191,26 @@ export default function NewStandaloneVoice() {
   // مساعد مشترك: يولّد بصوت مستنسَخ موجود بالفعل، ثم يحلّل الناتج بالنص
   // المعروف فعليًّا (لحساب سرعة الكلام الحقيقية)، للاستعمال في التوليد
   // الأول وإعادة التوليد بعد الضبط معًا — بلا تكرار الكود.
+  const compareSpeaker = async (generatedBase64) => {
+    const blob = mode === "upload" ? file : recordedBlob;
+    if (!blob || !generatedBase64) return;
+    setSpeakerBusy(true);
+    setSpeakerResult(null);
+    try {
+      const originalBase64 = await blobToBase64(blob);
+      const response = await fetch("/api/speaker-similarity", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ originalBase64, generatedBase64, accessToken: session.access_token })
+      });
+      const result = await response.json();
+      setSpeakerResult(response.ok ? result : { error: result.error || "محرك البصمة غير متاح" });
+    } catch {
+      setSpeakerResult({ error: "تعذر تشغيل مقارنة بصمة المتحدث" });
+    } finally {
+      setSpeakerBusy(false);
+    }
+  };
+
   const generateAndAnalyze = async (vId, settingsToUse) => {
     const res = await fetch("/api/preview-voice", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -197,6 +219,7 @@ export default function NewStandaloneVoice() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     setGeneratedAudio(`data:audio/mpeg;base64,${data.audioBase64}`);
+    void compareSpeaker(data.audioBase64);
 
     const genRes = await fetch("/api/analyze-sample", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -231,6 +254,7 @@ export default function NewStandaloneVoice() {
       if (!res.ok) throw new Error(data.error);
       setVoiceId(data.voiceId);
       setGeneratedAudio(`data:audio/mpeg;base64,${data.audioBase64}`);
+      void compareSpeaker(data.audioBase64);
 
       const genRes = await fetch("/api/analyze-sample", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -467,6 +491,15 @@ export default function NewStandaloneVoice() {
           {genAnalysis && (
             <>
               <div style={{ marginTop: 20 }}><AnalysisPanel title="تحليل الصوت المُستنسَخ" data={genAnalysis} /></div>
+              <div style={{ marginTop: 16, padding: 16, borderRadius: 12, background: "#F5F8F7", border: "1px solid #DCE4DF" }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>🧬 تشابه بصمة المتحدث (ECAPA)</div>
+                {speakerBusy ? <div>جارٍ تحليل بصمة الصوتين…</div> :
+                  speakerResult?.cosine_similarity != null ?
+                    <><div style={{ fontSize: 22, fontWeight: 800 }}>{speakerResult.cosine_similarity.toFixed(3)}</div>
+                    <div style={{ fontSize: 12, color: "#5B6F6C" }}>درجة تشابه خام، وليست نسبة مئوية أو احتمال تطابق الهوية.</div></> :
+                    <div style={{ color: "#8A6D1F", fontSize: 13 }}>{speakerResult?.error || "محرك البصمة غير مفعّل بعد."}</div>}
+                <div style={{ marginTop: 8, fontSize: 12, color: "#5B6F6C" }}>نتيجة مستقلة عن مقارنة الخصائص الصوتية، ولا تصلح وحدها لإثبات هوية شخص.</div>
+              </div>
               {match && <MatchPanel match={match} />}
               {match && <ComparisonChart rows={match.rows} />}
 
@@ -600,7 +633,7 @@ function MatchPanel({ match }) {
             <span style={{ fontWeight: 800, fontSize: 18, color: color(match.overallPct) }}>{match.overallPct != null ? `${match.overallPct}%` : "—"}</span>
           </div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700 }}>نسبة التطابق الكلية</div>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>تشابه الخصائص الصوتية التقريبي</div>
       </div>
       <div style={{ display: "grid", gap: 8 }}>
         {match.rows.map((r) => (
